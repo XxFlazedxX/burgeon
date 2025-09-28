@@ -1,0 +1,237 @@
+--[[  
+    FLZ Throw/Pull Toggle (Smooth, Blue/White Theme)
+    X = toggle (0.2s delay)
+    OFF -> "Throw: OFF" (smooth launch, slower)
+    ON  -> "Pull: ON"   (winch / ease-in)
+    By Flazed
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LP = Players.LocalPlayer
+local Character = LP.Character or LP.CharacterAdded:Wait()
+
+-- Winch Presets
+local winchSettings = {
+    on  = { Speed = 1200000000, Responsiveness = 15000, Target = 5 },
+    off = { Speed = 1300,  Responsiveness = 8000,  Target = 1000000000000 },
+}
+
+-- Throw (smooth)
+local THROW_ACCEL, UP_ACCEL, THROW_TIME = 120, 35, 0.12
+local isActive = false
+local currentPreset = winchSettings.off
+
+-- === Helpers ===
+local function getHRP()
+    Character = LP.Character or LP.CharacterAdded:Wait()
+    return Character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getMainRope()
+    Character = LP.Character or LP.CharacterAdded:Wait()
+    for _, d in ipairs(Character:GetDescendants()) do
+        if d:IsA("RopeConstraint") then return d end
+    end
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("RopeConstraint") then
+            local a, b = d.Attachment0, d.Attachment1
+            if a and a.Parent and a.Parent:IsDescendantOf(Character) then return d end
+            if b and b.Parent and b.Parent:IsDescendantOf(Character) then return d end
+        end
+    end
+    return nil
+end
+
+local function applyWinch(rope, preset)
+    if rope then
+        rope.WinchEnabled = true
+        rope.WinchSpeed = preset.Speed
+        rope.WinchResponsiveness = preset.Responsiveness
+        rope.WinchTarget = preset.Target
+    end
+end
+
+local function throwPlayerSmoothFast()
+    local hrp = getHRP()
+    if not hrp then return end
+
+    local look = hrp.CFrame.LookVector
+    local dir = Vector3.new(look.X, 0, look.Z)
+    dir = (dir.Magnitude < 1e-3) and Vector3.new(0,0,-1) or dir.Unit
+
+    local att = Instance.new("Attachment", hrp)
+    att.Name = "FLZ_Throw_Att"
+
+    local vf = Instance.new("VectorForce")
+    vf.Attachment0 = att
+    vf.RelativeTo = Enum.ActuatorRelativeTo.World
+    vf.ApplyAtCenterOfMass = true
+    vf.Parent = hrp
+
+    local mass = hrp.AssemblyMass
+    local t0 = os.clock()
+    local function easeInOutSine(a) return -0.5*(math.cos(math.pi*a)-1) end
+
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        local t = os.clock() - t0
+        if t >= THROW_TIME or not hrp.Parent then
+            vf.Force = Vector3.zero
+            if conn then conn:Disconnect() end
+            task.defer(function() if vf then vf:Destroy() end if att then att:Destroy() end end)
+            return
+        end
+        local a = math.clamp(t / THROW_TIME, 0, 1)
+        local scale = easeInOutSine(a)
+        vf.Force = (dir * THROW_ACCEL + Vector3.new(0, UP_ACCEL, 0)) * mass * scale
+    end)
+end
+
+-- === GUI ===
+local gui = Instance.new("ScreenGui")
+gui.Name = "FLZ_ToggleGUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = (gethui and gethui()) or game:GetService("CoreGui")
+
+local frame = Instance.new("Frame")
+-- Increased size: wider and taller
+frame.Size = UDim2.new(0, 220, 0, 90)
+frame.Position = UDim2.new(0, 20, 0, 120)
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 14)
+
+local stroke = Instance.new("UIStroke")
+stroke.Thickness = 3
+stroke.Color = Color3.fromRGB(85, 170, 255) -- light blue
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+-- slightly larger title area
+title.Size = UDim2.new(1, -12, 0, 20)
+title.Position = UDim2.new(0, 8, 0, 8)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamSemibold
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.fromRGB(200, 230, 255)
+title.Text = "By Flazed"
+title.Parent = frame
+
+local toggleBtn = Instance.new("TextButton")
+-- bigger button
+toggleBtn.Size = UDim2.new(1, -16, 0, 46)
+toggleBtn.Position = UDim2.new(0, 8, 0, 34)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(25, 30, 45)
+toggleBtn.TextColor3 = Color3.fromRGB(150, 200, 255)
+toggleBtn.AutoButtonColor = false
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 16
+toggleBtn.Text = "Throw: OFF"
+toggleBtn.Parent = frame
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 10)
+
+-- Hover FX
+local function hover(on)
+    local bg = on and Color3.fromRGB(45, 60, 85) or Color3.fromRGB(25, 30, 45)
+    local txt = on and Color3.fromRGB(240, 250, 255) or Color3.fromRGB(150, 200, 255)
+    TweenService:Create(toggleBtn, TweenInfo.new(0.12, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+        BackgroundColor3 = bg,
+        TextColor3 = txt
+    }):Play()
+end
+toggleBtn.MouseEnter:Connect(function() hover(true) end)
+toggleBtn.MouseLeave:Connect(function() hover(false) end)
+
+-- Edge banners
+local function makeBanner(yPosUDim)
+    local b = Instance.new("Frame")
+    b.Size = UDim2.new(1, 0, 0, 3)
+    b.Position = UDim2.new(0, 0, yPosUDim, yPosUDim == 0 and -3 or 0)
+    b.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
+    b.BorderSizePixel = 0
+    b.Parent = frame
+
+    local shine = Instance.new("Frame")
+    shine.Size = UDim2.new(0.18, 0, 1, 0)
+    shine.Position = UDim2.new(-0.18, 0, 0, 0)
+    shine.BackgroundColor3 = Color3.fromRGB(200, 230, 255)
+    shine.BackgroundTransparency = 0.2
+    shine.BorderSizePixel = 0
+    shine.Parent = b
+
+    local grad = Instance.new("UIGradient")
+    grad.Transparency = NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.5, 0),
+        NumberSequenceKeypoint.new(1, 1)
+    }
+    grad.Parent = shine
+
+    task.spawn(function()
+        while shine.Parent do
+            shine.Position = UDim2.new(-0.18, 0, 0, 0)
+            TweenService:Create(
+                shine,
+                TweenInfo.new(2.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                {Position = UDim2.new(1, 0, 0, 0)}
+            ):Play()
+            task.wait(2.6)
+        end
+    end)
+
+    return b
+end
+makeBanner(0)
+makeBanner(1)
+
+-- UI State
+local function setUIState(active)
+    if active then
+        toggleBtn.Text = "Pull: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
+        toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        stroke.Color = Color3.fromRGB(85, 170, 255)
+    else
+        toggleBtn.Text = "Throw: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(25, 30, 45)
+        toggleBtn.TextColor3 = Color3.fromRGB(150, 200, 255)
+        stroke.Color = Color3.fromRGB(85, 170, 255)
+    end
+end
+
+-- Logic
+local function toggleThrowPull()
+    isActive = not isActive
+    local rope = getMainRope()
+
+    if isActive then
+        currentPreset = winchSettings.on
+        setUIState(true)
+        if rope then applyWinch(rope, winchSettings.on) end
+    else
+        currentPreset = winchSettings.off
+        setUIState(false)
+        if rope then applyWinch(rope, winchSettings.off) end
+        throwPlayerSmoothFast()
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(toggleThrowPull)
+
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.X then
+        task.delay(0.2, toggleThrowPull)
+    end
+end)
+
+print("[FLZ] Throw/Pull toggle loaded. Blue/White theme. By Flazed.")
